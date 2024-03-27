@@ -97,8 +97,7 @@ fn global_vars(f: &mut super::Output, bin: PeFile<'_>) {
 
 fn name_list(f: &mut super::Output, bin: PeFile<'_>) {
 	let mut save = [0; 4];
-	// pat!("48634338 488D0D${'} 4803C0 488B44C1F0")
-	// pat!("4C8D05${'}0F1F40008D42FE")
+	//old: pat!("48634338 488D0D${'} 4803C0 488B44C1F0")
 	if bin.scanner().matches_code(pat!("4C8D05${'}0F1F40008D42FE")).next(&mut save) {
 		let name_list = save[1];
 		let _ = writeln!(f.ini, "NameList={:#x}", name_list);
@@ -162,7 +161,6 @@ fn client_state(f: &mut super::Output, bin: PeFile<'_>) {
 		return;
 	}
 
-
 	/*
 	// SignonState = ClientState + 0x98 has values 0...8
 	if bin.scanner().finds_code(pat!("@3 833D${?'}08 0F94C0 C3")) {
@@ -173,6 +171,15 @@ fn client_state(f: &mut super::Output, bin: PeFile<'_>) {
 		crate::print_error("unable to find SignonState");
 	}
 	*/
+	// old: "488D05${\"dedicated\"} C3 833D${?'}02 488D05${00} 7C07 488D05${'} C3"
+	if bin.scanner().finds_code(pat!("8B05${'} 83F80875418B05 [4]"), &mut save) {
+		let signon_state = save[1];
+		let _ = writeln!(f.ini, "SignonState={:#x}", signon_state);
+	}
+	else {
+		crate::print_error("unable to find SignonState");
+	}
+
 	// LevelName and SignonState together, look for string "dedicated" the smaller of the two routines
 	// LevelName is [u8; 0x40] (buffer of 0x40 bytes inlined in the struct)
 	// 48 8D 15 ? ? ? ? 48 8B 45 F8 48 8D 0D ? ? ? ? 
@@ -221,6 +228,7 @@ fn local_camera(f: &mut super::Output, bin: PeFile<'_>) {
 
 fn highlight_settings(f: &mut super::Output, bin: PeFile<'_>) {
 	let mut save = [0; 4];
+	// old: 488B05${'} 448944C8? 44894CC8? 488B4A50
 	if bin.scanner().finds_code(pat!("488B05${'} 8B540130"), &mut save) {
 		let settings = save[1];
 		let _ = writeln!(f.ini, "HighlightSettings={:#x}", settings);
