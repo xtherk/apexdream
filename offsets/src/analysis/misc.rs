@@ -17,8 +17,11 @@ pub fn print(f: &mut super::Output, bin: PeFile<'_>) {
 	view_render(f, bin);
 	client_state(f, bin);
 	// unknown_magic(f, bin);
+	last_visible(f, bin);
+	weapon_projectile(f, bin);
 	local_camera(f, bin);
 	studio_hdr(f, bin);
+	highlight_settings(f, bin);
 	network_var(f, bin);
 	let _ = writeln!(f.human, "```\n");
 	let _ = writeln!(f.ini);
@@ -42,7 +45,8 @@ fn entity_list(f: &mut super::Output, bin: PeFile<'_>) {
 	//
 	// entity_ptr = *(uintptr_t*)(entity_list + index * 32)
 	let mut save = [0; 4];
-	if bin.scanner().finds_code(pat!("81F9u4 7C% 85C9 79% 4863C1 488D15$'"), &mut save) {
+	// old: 81F9u4 7C% 85C9 79% 4863C1 488D15$'
+	if bin.scanner().finds_code(pat!("81F9u4 7C% 85C9 79% 4863C1 488D0D$'"), &mut save) {
 		let num_ent_entries = save[1];
 		let cl_entitylist = save[2];
 		let _ = writeln!(f.ini, "NUM_ENT_ENTRIES={:#x}", num_ent_entries);
@@ -68,8 +72,9 @@ fn local_entity_handle(f: &mut super::Output, bin: PeFile<'_>) {
 fn local_player(f: &mut super::Output, bin: PeFile<'_>) {
 	// The global instance of C_GameMovement contains as its first member a pointer to local player right after its vtable.
 	let mut save = [0; 4];
-	if bin.scanner().finds_code(pat!("8981??0000 488B1D${'}"), &mut save) {
-		let local_player_ptr = save[1];
+	// old: pat!("8981??0000 488B1D${'}")
+	if bin.scanner().finds_code(pat!("488B05${'} 488D0D???? 4488????? 4C89"), &mut save) {
+		let local_player_ptr = save[1] + 8;
 		let _ = writeln!(f.ini, "LocalPlayer={:#x}", local_player_ptr);
 	}
 	else {
@@ -92,7 +97,9 @@ fn global_vars(f: &mut super::Output, bin: PeFile<'_>) {
 
 fn name_list(f: &mut super::Output, bin: PeFile<'_>) {
 	let mut save = [0; 4];
-	if bin.scanner().matches_code(pat!("48634338 488D0D${'} 4803C0 488B44C1F0")).next(&mut save) {
+	// pat!("48634338 488D0D${'} 4803C0 488B44C1F0")
+	// pat!("4C8D05${'}0F1F40008D42FE")
+	if bin.scanner().matches_code(pat!("4C8D05${'}0F1F40008D42FE")).next(&mut save) {
 		let name_list = save[1];
 		let _ = writeln!(f.ini, "NameList={:#x}", name_list);
 	}
@@ -127,7 +134,9 @@ fn view_render(f: &mut super::Output, bin: PeFile<'_>) {
 		return;
 	}
 
-	if bin.scanner().finds_code(pat!("480fbec2 488b84c1u4 c3"), &mut save) {
+	// old: pat!("480fbec2 488b84c1u4 c3")
+	let pattern = pat!("4889[5] 498BB6u4 498B9E[4] E8");
+	if bin.scanner().finds_code(pattern, &mut save) {
 		view_matrix = save[1];
 	}
 	else {
@@ -144,7 +153,7 @@ fn client_state(f: &mut super::Output, bin: PeFile<'_>) {
 
 	// Address of global CClientState instance
 	// old: pat!("488D15${\"Missing client class\"} [1-10] 75% 488D0D$'")
-	if bin.scanner().finds_code(pat!("488D15${\"Missing client class\"} 488B05$'"), &mut save) {
+	if bin.scanner().finds_code(pat!("488D5424?488B05${'} 488D0D [4] 48897C24?"), &mut save) {
 		let client_state = save[1];
 		let _ = writeln!(f.ini, "ClientState={:#x}", client_state);
 	}
@@ -166,14 +175,22 @@ fn client_state(f: &mut super::Output, bin: PeFile<'_>) {
 	*/
 	// LevelName and SignonState together, look for string "dedicated" the smaller of the two routines
 	// LevelName is [u8; 0x40] (buffer of 0x40 bytes inlined in the struct)
-	if bin.scanner().finds_code(pat!("488D05${\"dedicated\"} C3 833D${?'}02 488D05${00} 7C07 488D05${'} C3"), &mut save) {
-		let signon_state = save[1];
-		let level_name = save[2];
-		let _ = writeln!(f.ini, "SignonState={:#x}", signon_state);
+	// 48 8D 15 ? ? ? ? 48 8B 45 F8 48 8D 0D ? ? ? ? 
+	if bin.scanner().finds_code(pat!("488D15${'} 488B45F8488D0D [4]"), &mut save) {
+		let level_name = save[1];
 		let _ = writeln!(f.ini, "LevelName={:#x}", level_name);
 	}
 	else {
 		crate::print_error("unable to find LevelName");
+	}
+
+	// old: "488D05${\"dedicated\"} C3 833D${?'}02 488D05${00} 7C07 488D05${'} C3"
+	if bin.scanner().finds_code(pat!("8B05${'} 83F80875418B05 [4]"), &mut save) {
+		let signon_state = save[1];
+		let _ = writeln!(f.ini, "SignonState={:#x}", signon_state);
+	}
+	else {
+		crate::print_error("unable to find SignonState");
 	}
 }
 
@@ -199,6 +216,41 @@ fn local_camera(f: &mut super::Output, bin: PeFile<'_>) {
 	}
 	else {
 		crate::print_error("unable to find CPlayer camera offsets");
+	}
+}
+
+fn highlight_settings(f: &mut super::Output, bin: PeFile<'_>) {
+	let mut save = [0; 4];
+	if bin.scanner().finds_code(pat!("488B05${'} 8B540130"), &mut save) {
+		let settings = save[1];
+		let _ = writeln!(f.ini, "HighlightSettings={:#x}", settings);
+	}
+	else {
+		crate::print_error("unable to find HighlightSettings offsets");
+	}
+}
+
+fn last_visible(f: &mut super::Output, bin: PeFile<'_>) {
+	let mut save = [0; 4];
+	if bin.scanner().finds_code(pat!("4C8BCE 498B3E F3410F1081 u4 663B774E 0F83"), &mut save) {
+		let last_vis = save[1];
+		let _ = writeln!(f.ini, "CPlayer!lastVisibleTime={:#x}", last_vis);
+		let _ = writeln!(f.ini, "CWeaponX!crosshairTargetTime={:#x}", last_vis + 4);
+		let _ = writeln!(f.ini, "CWeaponX!lastCrosshairTargetTime={:#x}", last_vis + 8);
+	}
+	else {
+		crate::print_error("unable to find CPlayer lastVisibleTime offsets");
+	}
+}
+
+fn weapon_projectile(f: &mut super::Output, bin: PeFile<'_>) {
+	let mut save = [0; 4];
+	if bin.scanner().finds_code(pat!("F30F108Bu4 F30F1083[4] 488B05[4] F30F1093u4 "), &mut save) {
+		let _ = writeln!(f.ini, "CWeaponX!m_flProjectileSpeed={:#x}", save[1]);
+		let _ = writeln!(f.ini, "CWeaponX!m_flProjectileScale={:#x}", save[2]);
+	}
+	else {
+		crate::print_error("unable to find CWeaponX m_flProjectileSpeed offsets");
 	}
 }
 
